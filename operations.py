@@ -5,7 +5,6 @@ from datetime import datetime
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage import convolve
 import numpy as np, sys, os
-import networkx as nx
 import random as rnd
 
 
@@ -17,7 +16,11 @@ def result_directory():
     return rd
 
 
-def create_mesh(coord, n):
-    domain = RectangleMesh(Point(coord[0][0], coord[0][1]), Point(coord[1][0], coord[1][1]),
-                           n[0], n[1], 'crossed')
+def create_mesh(coord, n, random):
+    if random:
+        here = Rectangle(Point(coord[0][0], coord[0][1]), Point(coord[1][0], coord[1][1]))
+        domain = generate_mesh(here, n[2])
+    else:
+        domain = RectangleMesh(Point(coord[0][0], coord[0][1]), Point(coord[1][0], coord[1][1]),
+                               n[0], n[1], 'crossed')
     return domain
