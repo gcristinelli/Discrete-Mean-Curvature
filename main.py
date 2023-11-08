@@ -23,7 +23,7 @@ def _main():
     rd = result_directory()
 
     # ---variables
-    nx, ny, n = [500, 300, 400]
+    nx, ny, n = [500, 300, 600]
     lx1, lx2 = [-0.5, 0.5]
     ly1, ly2 = [0.0, 0.5]
     lz1, lz2 = [0.0, 0.5]
@@ -74,10 +74,11 @@ def _main():
     internal_facets = np.setdiff1d(facets_list, bdy_facets)
 
     # Doing the same for cells
-    cells_list = np.arange(domain.num_facets())
+    cells_list = np.arange(domain.num_cells())
     bdy_cells = np.array([f2c(facet)[0] for facet in bdy_facets], dtype=int)
     internal_cells = np.setdiff1d(cells_list, bdy_cells)
     adj_cells = np.array([[facet, f2c(facet)[0], f2c(facet)[1]] for facet in internal_facets], dtype=int)
+    # creating adj_cells takes a few seconds, but it makes the creation of the graph extremely efficient
 
     vol_cells.vector()[:] = [Cell(domain, cell).volume() for cell in range(domain.num_cells())]
     mid_cell = [Cell(domain, cell).midpoint().array() for cell in range(0, domain.num_cells())]
@@ -93,10 +94,10 @@ def _main():
         if mid_cell[f2c(facet)[0]][d - 1] >= height:
             bdy_length.vector()[f2c(facet)[0]] = +facet_size[facet]
 
-    # B2.---GRAPH GENERATION, creating graph with (d-1)-facets areas/length as weights
+    # B2.---GRAPH GENERATION, creating graph with (d-1)-facets areas/length as weights, takes less than 0.1 seconds
     G = maxflow.GraphFloat()
     G.add_nodes(domain.num_cells())
-    for facet in internal_facets: G.add_edge(f2c(facet)[0], f2c(facet)[1], facet_size[facet], facet_size[facet])
+    G.add_edges(adj_cells[:, 1], adj_cells[:, 2], facet_size[adj_cells[:, 0]], facet_size[adj_cells[:, 0]])
 
     print("Making the mesh of {} vertices, {} {}-dimensional cells, and the graph took - {} seconds \n".format(
         domain.num_vertices(), domain.num_cells(), d, time.time() - start))

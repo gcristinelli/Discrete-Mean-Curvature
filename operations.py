@@ -5,6 +5,7 @@ from datetime import datetime
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage import convolve
 import numpy as np, sys, os
+import time as time
 import random as rnd
 
 
@@ -35,11 +36,13 @@ def create_mesh(coord, n, random):
 
 
 def linear_problem(domain, graph, face_coeff, dist, cut_result, vol_cells, bdy_length):
+    start_time = time.time()
     val = face_coeff * dist.vector() * vol_cells.vector() + bdy_length.vector()
     graph.add_grid_tedges(np.arange(domain.num_cells()), np.maximum(0.0, val), np.maximum(0.0, -val))
     energy = graph.maxflow()
     cut_result.vector()[:] = graph.get_grid_segments(np.arange(domain.num_cells())).astype(float)
     graph.add_grid_tedges(np.arange(domain.num_cells()), -np.maximum(0.0, val), -np.maximum(0.0, -val))
+    print(" cut took took - %.2f seconds \n" % (time.time() - start_time))
     return energy
 
 def _solve_elasticity_dirichlet(domain, cut, dx, coord, mu, lbd, weak, e0):
