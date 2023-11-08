@@ -66,7 +66,6 @@ def _main():
     vol_cells, bdy_length = Function(V), Function(V)
     domain.init(d - 1, d)
     f2c = domain.topology()(d - 1, d)
-    adjacency = np.empty(shape=[0, 2])
     int_lengths, facet_size = np.empty(0), np.empty(0)
 
     # Creating two array of indices of (d-1)-dimensional objects (boundary or internal)
@@ -111,14 +110,12 @@ def _main():
     pp.savefig(rd + '/input.png', bbox_inches='tight', dpi=300)
     pp.close()
 
-    # distance function to boundary of input
+    # distance function to boundary of input, first we define a binary function over the facets of the domain
+    # that indicates when a facet is in the boundary of the input_data
     bdy_input = MeshFunction('size_t', domain, d - 1, 0)
-    start = time.time()
-    for facet in internal_facets:
-        bdy_input.array()[facet] = np.abs(input_data.vector()[f2c(facet)[0]] - input_data.vector()[f2c(facet)[1]])
-    for facet in bdy_facets:
-        bdy_input.array()[facet] = np.abs(input_data.vector()[f2c(facet)[0]])
-    print(time.time()-start)
+    bdy_input.array()[bdy_facets] = np.array([abs(input_data.vector()[f2c(facet)[0]]) for facet in bdy_facets])
+    bdy_input.array()[adj_cells[:, 0]] = abs(
+        input_data.vector()[adj_cells[:, 1]] - input_data.vector()[adj_cells[:, 2]])
 
     #Fast marching method to solve Eikonal equation
 
