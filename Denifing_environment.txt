@@ -1,0 +1,9 @@
+CONDA_SUBDIR=osx-64 conda create -n platformx86 python=3.8
+
+conda activate platformx86
+
+conda config --env --add channels https://conda.anaconda.org/conda-forge/osx-64/
+
+conda install numpy, scipy, fenics, matplotlib, mshr, vtk
+
+pip install pymaxflow, ttcrpy
