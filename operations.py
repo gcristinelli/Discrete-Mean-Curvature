@@ -78,6 +78,5 @@ def extract_bdy_nodes(fun, domain, d, bdy_facets, adj_cells):
     bdy_fun_nodes = np.array([f2n(facet) for facet in bdy_fun_indices], dtype=int)
     bdy_fun_nodes = np.column_stack(bdy_fun_nodes).astype(int)
     bdy_fun_nodes = np.unique(bdy_fun_nodes)
-    bdy_fun_nodes = domain.coordinates()[bdy_fun_nodes]
     return bdy_fun_nodes
 

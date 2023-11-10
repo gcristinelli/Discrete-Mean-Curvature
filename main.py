@@ -23,13 +23,13 @@ def _main():
     rd = result_directory()
 
     # ---variables
-    nx, ny, n = [500, 300, 300]
+    nx, ny, n = [200, 200, 50]
     lx1, lx2 = [-0.5, 0.5]
     ly1, ly2 = [0.0, 0.5]
     lz1, lz2 = [0.0, 0.5]
     random = True
     d = 2
-    height = 0.4
+    height = 0.45
     input_slope = 1
 
     # BOUNDARY PARAMETERS
@@ -87,7 +87,7 @@ def _main():
     # B2. --MOVING MESH TO MESH2D
     start_0 = time.time()
     if d == 2:
-        domain2 = Mesh2d(domain.coordinates(), cells_construction, method='SPM')
+        domain2 = Mesh2d(domain.coordinates(), cells_construction, method='FSM')
     else:
         domain2 = Mesh3d(domain.coordinates(), cells_construction, method='FSM')
     print('exporting took {} seconds \n'.format(time.time()-start_0))
@@ -109,26 +109,34 @@ def _main():
     pp.savefig(rd + '/input.png', bbox_inches='tight', dpi=300)
     pp.close()
 
-    # distance function to boundary of input, first we define a binary function over the facets of the domain
-    # that indicates when a facet is in the boundary of the input_data
     bdy_nodes = extract_bdy_nodes(input_data, domain, d, bdy_facets, adj_cells)
-    source = np.reshape(domain.coordinates()[1], (1, -1))
-    tt, rays = domain2.raytrace(source, bdy_nodes, return_rays=True)
-    print(np.count_nonzero(tt))
-    mesh_tt = domain2.get_grid_traveltimes()
-    print(np.count_nonzero(mesh_tt))
+    bdy_coordinates = domain.coordinates()[bdy_nodes]
+    slowness = np.ones((cells_construction.shape[0],))
+    distance = np.zeros((len(bdy_nodes), domain.num_vertices()))
+    start = time.time()
+    for node in range(len(bdy_nodes)):
+        source = np.reshape(domain.coordinates()[bdy_nodes[node]], (1, -1))
+        tt = domain2.raytrace(source, bdy_coordinates, slowness)
+        distance[node] = domain2.get_grid_traveltimes()
 
-    #plotting the resulting rays
+    min_distance = np.min(distance, axis=0)
+    print(time.time()-start)
+    #dist = Function(Vr)
+    #dist.vector()[:] = min_distance[:]
+
     fig = pp.figure()
     ax = fig.add_subplot()
-    ax.plot(bdy_nodes[:, 0], bdy_nodes[:, 1], ',')
-
+    ax.plot(bdy_coordinates[:, 0], bdy_coordinates[:, 1], ',')
+    tpc = ax.tripcolor(domain.coordinates()[:, 0], domain.coordinates()[:, 1], cells_construction, min_distance)
+    cbar = pp.colorbar(tpc, ax=ax)
+    cbar.ax.set_ylabel('Traveltime', fontsize=14)
     # add rays for the receivers at the surface
-    nRx = bdy_nodes.shape[0]
+    """nRx = bdy_nodes.shape[0]
     for r in rays[:nRx]:
         pp.plot(r[:, 0], r[:, 1], c=[0.5, 0.5, 0.5], lw=0.001)
-
-    pp.show()
+    ax = plot(dist)
+    pp.colorbar(ax, shrink=0.55, format='%01.3f')"""
+    pp.savefig(rd + '/bdy_input.png', bbox_inches='tight', dpi=300)
     pp.close()
 
     #Fast marching method to solve Eikonal equation
@@ -139,13 +147,30 @@ def _main():
     while it <= max_it or stop:
         face_coeff = face_coeff * 0.8
         print("--Doing iteration", it)
-        # L1.---Distance function to the boundary of the previous cut
-        bdy_cut = MeshFunction('size_t', domain, d - 1, 0)
-
-        # L2.--- new cut
+        # L1.--- new cut
         cut_value = linear_problem(domain, G, face_coeff, input_data, cut_result, vol_cells, bdy_length)
         ax = plot(cut_result, vmin=0.0, vmax=1.0)
         pp.savefig(rd + '/cut_%s.png' % it, bbox_inches='tight', dpi=300)
+        pp.close()
+
+        bdy_nodes = extract_bdy_nodes(cut_result, domain, d, bdy_facets, adj_cells)
+        source = np.reshape(domain.coordinates()[1], (1, -1))
+        tt = domain2.raytrace(source, bdy_nodes)
+        print(np.count_nonzero(tt))
+        mesh_tt = domain2.get_grid_traveltimes()
+        print(np.count_nonzero(mesh_tt))
+
+        # plotting the resulting rays
+        fig = pp.figure()
+        ax = fig.add_subplot()
+        ax.plot(bdy_nodes[:, 0], bdy_nodes[:, 1], ',')
+
+        # add rays for the receivers at the surface
+        """nRx = bdy_nodes.shape[0]
+        for r in rays[:nRx]:
+            pp.plot(r[:, 0], r[:, 1], c=[0.5, 0.5, 0.5], lw=0.001)"""
+
+        pp.savefig(rd + '/bdy_cut_%s.png' % it, bbox_inches='tight', dpi=300)
         pp.close()
         it += 1
 
