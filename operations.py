@@ -45,35 +45,39 @@ def linear_problem(domain, graph, face_coeff, dist, cut_result, vol_cells, bdy_l
     print(" cut took took - %.2f seconds \n" % (time.time() - start_time))
     return energy
 
-def _solve_elasticity_dirichlet(domain, cut, dx, coord, mu, lbd, weak, e0):
-    V = FunctionSpace(domain, 'DG', 0)  # PWC
-    V_vec = VectorFunctionSpace(domain, 'DG', 0)
 
-    def left(x, on_boundary): return x[0] < coord[0][0] + DOLFIN_EPS
+def mat2func(px, py, fn, fn_mat, dofsV_max):
+    for dof in range(0, dofsV_max):
+        if np.rint(px[dof]) % 2 == .0:
+            cx, cy = np.int_(np.rint([px[dof] / 2, py[dof] / 2]))
+            fn.vector()[dof] = fn_mat[cy, cx]
+        else:
+            cx, cy = np.int_(np.floor([px[dof] / 2, py[dof] / 2]))
+            fn.vector()[dof] = 0.25 * (fn_mat[cy, cx] + fn_mat[cy + 1, cx] \
+                                       + fn_mat[cy, cx + 1] + fn_mat[cy + 1, cx + 1])
+    return fn
 
-    def right(x, on_boundary): return x[0] > coord[1][0] - DOLFIN_EPS
 
-    def up(x, on_boundary): return x[1] > coord[0][1] - DOLFIN_EPS
+# ----------------------------------------------------------------------
+def func2mat(px, py, fn, fn_mat, dofsV_max):
+    fn_array = fn.vector().get_local()
+    for dof in range(0, dofsV_max):
+        cx, cy = np.int_(np.rint([px[dof] / 2, py[dof] / 2]))
+        fn_mat[cy, cx] = fn_array[dof]
+    return fn_mat
 
-    def down(x, on_boundary): return x[1] < coord[1][1] + DOLFIN_EPS
 
-    mismatch = Expression(("-1.0 * E0 * ( x[0] - 0.5*(Lx2+Lx1) )", " 0.0"), E0=e0, Lx1=coord[0][0], Lx2=coord[1][0],
-                          degree=1)
-    bc3 = DirichletBC(V_vec, mismatch, down)
-    bcs = [bc3]
-    u, v = [TrialFunction(V_vec), TestFunction(V_vec)]
-    S1 = 2.0 * mu * inner(sym(grad(u)), sym(grad(v))) + lbd * div(u) * div(v)
-    a = S1 * weak * dx(0) + S1 * dx(1)
-    L = inner(Constant((0.0, 0.0)), v) * dx
-    A, b = assemble_system(a, L, bcs)
-    solver = LUSolver(A)
-    solver.solve(U.vector(), b)
-    SE = 2.0 * mu * inner(sym(grad(U)), sym(grad(U))) + lbd * div(U) * div(U)
-    energy = assemble(SE * weak * dx(0) + SE * dx(1))
-    edens_aux = Function(V)
-    edens_aux = project(SE, V)
-    edens = Function(V)
-    edens_vec = np.multiply(edens_aux.vector(), cut.vector()) + \
-                weak * np.multiply(edens_aux.vector(), 1.0 - cut.vector())
-    edens.vector()[:] = edens_vec
-    return edens, energy
+def extract_bdy_nodes(fun, domain, d, bdy_facets, adj_cells):
+    f2n = domain.topology()(d - 1, 0)
+    f2c = domain.topology()(d - 1, d)
+    bdy_fun = MeshFunction('size_t', domain, d - 1, 0)
+    bdy_fun.array()[bdy_facets] = np.array([abs(fun.vector()[f2c(facet)[0]]) for facet in bdy_facets])
+    bdy_fun.array()[adj_cells[:, 0]] = abs(
+        fun.vector()[adj_cells[:, 1]] - fun.vector()[adj_cells[:, 2]])
+    bdy_fun_indices = np.column_stack(np.nonzero(bdy_fun.array())).astype(int)
+    bdy_fun_nodes = np.array([f2n(facet) for facet in bdy_fun_indices], dtype=int)
+    bdy_fun_nodes = np.column_stack(bdy_fun_nodes).astype(int)
+    bdy_fun_nodes = np.unique(bdy_fun_nodes)
+    bdy_fun_nodes = domain.coordinates()[bdy_fun_nodes]
+    return bdy_fun_nodes
+

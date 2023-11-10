@@ -8,8 +8,8 @@ from datetime import datetime
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage import convolve
 import numpy as np, sys, os
-import networkx as nx
 import random as rnd
+from ttcrpy.tmesh import Mesh2d, Mesh3d
 
 from operations import *
 
@@ -23,28 +23,17 @@ def _main():
     rd = result_directory()
 
     # ---variables
-    nx, ny, n = [500, 300, 600]
+    nx, ny, n = [500, 300, 300]
     lx1, lx2 = [-0.5, 0.5]
     ly1, ly2 = [0.0, 0.5]
     lz1, lz2 = [0.0, 0.5]
     random = True
     d = 2
-    height = 0.2
+    height = 0.4
     input_slope = 1
 
     # BOUNDARY PARAMETERS
     face_coeff = 30
-    bdy_coeff_bone = -0.95
-    bdy_coeff_scaffold = -0.9
-    bdy_coeff_side = 1
-
-    # ELASTICITY Parameters
-    mu = 8.0  # Lame coefficient
-    lbd = 16.0  # Lame coefficient
-    eps1 = 0.0001  # small parameter avoiding division by zero in the normal computation
-    weak = 0.01  # multiplicative coefficient for the "weak" material mimicking void
-    e0 = 0.9  # spontaneous strain along bottom boundary
-    elas_coeff = 0.00  # coefficient in front of shape derivative for descent
 
     # GEOMETRY LOOP ----------------------------------------------------------------------------------------------------
     print("Starting geometry loop...\n")
@@ -58,14 +47,15 @@ def _main():
     pp.close()
 
     V = FunctionSpace(domain, 'DG', 0)  # PWC
-    VL = FunctionSpace(domain, 'CG', 1)  # PWL
+    Vr = FunctionSpace(domain, 'CG', 1)  # PWL
     V_vec = VectorFunctionSpace(domain, 'DG', 0)
     Vmat = TensorFunctionSpace(domain, 'DG', 0)
-    VL_vec = VectorFunctionSpace(domain, 'CG', 1)
+    Vr_vec = VectorFunctionSpace(domain, 'CG', 1)
 
     vol_cells, bdy_length = Function(V), Function(V)
-    domain.init(d - 1, d)
+    domain.init()
     f2c = domain.topology()(d - 1, d)
+    c2n = domain.topology()(d, 0)
     int_lengths, facet_size = np.empty(0), np.empty(0)
 
     # Creating two array of indices of (d-1)-dimensional objects (boundary or internal)
@@ -75,8 +65,8 @@ def _main():
 
     # Doing the same for cells
     cells_list = np.arange(domain.num_cells())
+    cells_construction = np.array([c2n(cell) for cell in cells_list], dtype=int)
     bdy_cells = np.array([f2c(facet)[0] for facet in bdy_facets], dtype=int)
-    internal_cells = np.setdiff1d(cells_list, bdy_cells)
     adj_cells = np.array([[facet, f2c(facet)[0], f2c(facet)[1]] for facet in internal_facets], dtype=int)
     # creating adj_cells takes a few seconds, but it makes the creation of the graph extremely efficient
 
@@ -92,7 +82,15 @@ def _main():
     # Adding boundary info
     for facet in bdy_facets:
         if mid_cell[f2c(facet)[0]][d - 1] >= height:
-            bdy_length.vector()[f2c(facet)[0]] = +facet_size[facet]
+            bdy_length.vector()[f2c(facet)[0]] += facet_size[facet]
+
+    # B2. --MOVING MESH TO MESH2D
+    start_0 = time.time()
+    if d == 2:
+        domain2 = Mesh2d(domain.coordinates(), cells_construction, method='SPM')
+    else:
+        domain2 = Mesh3d(domain.coordinates(), cells_construction, method='FSM')
+    print('exporting took {} seconds \n'.format(time.time()-start_0))
 
     # B2.---GRAPH GENERATION, creating graph with (d-1)-facets areas/length as weights, takes less than 0.1 seconds
     G = maxflow.GraphFloat()
@@ -113,10 +111,25 @@ def _main():
 
     # distance function to boundary of input, first we define a binary function over the facets of the domain
     # that indicates when a facet is in the boundary of the input_data
-    bdy_input = MeshFunction('size_t', domain, d - 1, 0)
-    bdy_input.array()[bdy_facets] = np.array([abs(input_data.vector()[f2c(facet)[0]]) for facet in bdy_facets])
-    bdy_input.array()[adj_cells[:, 0]] = abs(
-        input_data.vector()[adj_cells[:, 1]] - input_data.vector()[adj_cells[:, 2]])
+    bdy_nodes = extract_bdy_nodes(input_data, domain, d, bdy_facets, adj_cells)
+    source = np.reshape(domain.coordinates()[1], (1, -1))
+    tt, rays = domain2.raytrace(source, bdy_nodes, return_rays=True)
+    print(np.count_nonzero(tt))
+    mesh_tt = domain2.get_grid_traveltimes()
+    print(np.count_nonzero(mesh_tt))
+
+    #plotting the resulting rays
+    fig = pp.figure()
+    ax = fig.add_subplot()
+    ax.plot(bdy_nodes[:, 0], bdy_nodes[:, 1], ',')
+
+    # add rays for the receivers at the surface
+    nRx = bdy_nodes.shape[0]
+    for r in rays[:nRx]:
+        pp.plot(r[:, 0], r[:, 1], c=[0.5, 0.5, 0.5], lw=0.001)
+
+    pp.show()
+    pp.close()
 
     #Fast marching method to solve Eikonal equation
 
