@@ -42,29 +42,8 @@ def linear_problem(domain, graph, face_coeff, dist, cut_result, vol_cells, bdy_l
     energy = graph.maxflow()
     cut_result.vector()[:] = graph.get_grid_segments(np.arange(domain.num_cells())).astype(float)
     graph.add_grid_tedges(np.arange(domain.num_cells()), -np.maximum(0.0, val), -np.maximum(0.0, -val))
-    print(" cut took took - %.2f seconds \n" % (time.time() - start_time))
+    print(" cut took - %.2f seconds \n" % (time.time() - start_time))
     return energy
-
-
-def mat2func(px, py, fn, fn_mat, dofsV_max):
-    for dof in range(0, dofsV_max):
-        if np.rint(px[dof]) % 2 == .0:
-            cx, cy = np.int_(np.rint([px[dof] / 2, py[dof] / 2]))
-            fn.vector()[dof] = fn_mat[cy, cx]
-        else:
-            cx, cy = np.int_(np.floor([px[dof] / 2, py[dof] / 2]))
-            fn.vector()[dof] = 0.25 * (fn_mat[cy, cx] + fn_mat[cy + 1, cx] \
-                                       + fn_mat[cy, cx + 1] + fn_mat[cy + 1, cx + 1])
-    return fn
-
-
-# ----------------------------------------------------------------------
-def func2mat(px, py, fn, fn_mat, dofsV_max):
-    fn_array = fn.vector().get_local()
-    for dof in range(0, dofsV_max):
-        cx, cy = np.int_(np.rint([px[dof] / 2, py[dof] / 2]))
-        fn_mat[cy, cx] = fn_array[dof]
-    return fn_mat
 
 
 def extract_bdy_nodes(fun, domain, d, bdy_facets, adj_cells):

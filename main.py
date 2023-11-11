@@ -1,15 +1,7 @@
-from dolfin import *
 import maxflow
-import time as time
-import ufl
-from mshr import *
-from matplotlib import cm, pyplot as pp
-from datetime import datetime
-from scipy.ndimage import gaussian_filter
-from scipy.ndimage import convolve
-import numpy as np, sys, os
-import random as rnd
+import numpy as np
 from ttcrpy.tmesh import Mesh2d, Mesh3d
+from dolfin import *
 
 from operations import *
 
@@ -23,17 +15,17 @@ def _main():
     rd = result_directory()
 
     # ---variables
-    nx, ny, n = [200, 200, 50]
+    nx, ny, n = [200, 200, 80]
     lx1, lx2 = [-0.5, 0.5]
     ly1, ly2 = [0.0, 0.5]
     lz1, lz2 = [0.0, 0.5]
     random = True
     d = 2
-    height = 0.45
-    input_slope = 1
+    height = 0.1
+    input_slope = 3
 
     # BOUNDARY PARAMETERS
-    face_coeff = 30
+    face_coeff = 1e+3
 
     # GEOMETRY LOOP ----------------------------------------------------------------------------------------------------
     print("Starting geometry loop...\n")
@@ -48,6 +40,7 @@ def _main():
 
     V = FunctionSpace(domain, 'DG', 0)  # PWC
     Vr = FunctionSpace(domain, 'CG', 1)  # PWL
+    x = Vr.tabulate_dof_coordinates()
     V_vec = VectorFunctionSpace(domain, 'DG', 0)
     Vmat = TensorFunctionSpace(domain, 'DG', 0)
     Vr_vec = VectorFunctionSpace(domain, 'CG', 1)
@@ -56,6 +49,7 @@ def _main():
     domain.init()
     f2c = domain.topology()(d - 1, d)
     c2n = domain.topology()(d, 0)
+    d2v = dof_to_vertex_map(Vr)
     int_lengths, facet_size = np.empty(0), np.empty(0)
 
     # Creating two array of indices of (d-1)-dimensional objects (boundary or internal)
@@ -87,7 +81,7 @@ def _main():
     # B2. --MOVING MESH TO MESH2D
     start_0 = time.time()
     if d == 2:
-        domain2 = Mesh2d(domain.coordinates(), cells_construction, method='FSM')
+        domain2 = Mesh2d(domain.coordinates(), cells_construction, method='DSPM')
     else:
         domain2 = Mesh3d(domain.coordinates(), cells_construction, method='FSM')
     print('exporting took {} seconds \n'.format(time.time()-start_0))
@@ -100,7 +94,7 @@ def _main():
     print("Making the mesh of {} vertices, {} {}-dimensional cells, and the graph took - {} seconds \n".format(
         domain.num_vertices(), domain.num_cells(), d, time.time() - start))
 
-    # PDE AND INPUT ----------------------------------------------------------------------------------------------------
+    # INPUT and First distance function --------------------------------------------------------------------------------
     input_data = Function(V)
     input_data.vector()[:] = np.array([input_fun(mid_cell[cell], coord, input_slope)
                                        for cell in range(domain.num_cells())])
@@ -109,68 +103,54 @@ def _main():
     pp.savefig(rd + '/input.png', bbox_inches='tight', dpi=300)
     pp.close()
 
+    # Constructing distance function to the boundary of the input
     bdy_nodes = extract_bdy_nodes(input_data, domain, d, bdy_facets, adj_cells)
-    bdy_coordinates = domain.coordinates()[bdy_nodes]
     slowness = np.ones((cells_construction.shape[0],))
     distance = np.zeros((len(bdy_nodes), domain.num_vertices()))
     start = time.time()
     for node in range(len(bdy_nodes)):
         source = np.reshape(domain.coordinates()[bdy_nodes[node]], (1, -1))
-        tt = domain2.raytrace(source, bdy_coordinates, slowness)
+        tt = domain2.raytrace(source, source, slowness)
         distance[node] = domain2.get_grid_traveltimes()
-
     min_distance = np.min(distance, axis=0)
-    print(time.time()-start)
-    #dist = Function(Vr)
-    #dist.vector()[:] = min_distance[:]
+    dist = Function(Vr)
+    dist.vector()[:] = np.array([min_distance[d2v[i]] - 0.1 for i in range(domain.num_vertices())], dtype=float)
+    print("Computing the distance took - {} seconds \n".format(time.time() - start))
 
-    fig = pp.figure()
-    ax = fig.add_subplot()
-    ax.plot(bdy_coordinates[:, 0], bdy_coordinates[:, 1], ',')
-    tpc = ax.tripcolor(domain.coordinates()[:, 0], domain.coordinates()[:, 1], cells_construction, min_distance)
-    cbar = pp.colorbar(tpc, ax=ax)
-    cbar.ax.set_ylabel('Traveltime', fontsize=14)
-    # add rays for the receivers at the surface
-    """nRx = bdy_nodes.shape[0]
-    for r in rays[:nRx]:
-        pp.plot(r[:, 0], r[:, 1], c=[0.5, 0.5, 0.5], lw=0.001)
+    # Plotting the resulting distance
     ax = plot(dist)
-    pp.colorbar(ax, shrink=0.55, format='%01.3f')"""
-    pp.savefig(rd + '/bdy_input.png', bbox_inches='tight', dpi=300)
+    pp.colorbar(ax, shrink=0.55, format='%3f')
+    pp.savefig(rd + '/dist_input.png', bbox_inches='tight', dpi=300)
     pp.close()
-
-    #Fast marching method to solve Eikonal equation
 
     # MAIN LOOP --------------------------------------------------------------------------------------------------------
     max_it, it, stop = [50, 1, False]
     cut_result = Function(V)
     while it <= max_it or stop:
-        face_coeff = face_coeff * 0.8
         print("--Doing iteration", it)
         # L1.--- new cut
-        cut_value = linear_problem(domain, G, face_coeff, input_data, cut_result, vol_cells, bdy_length)
+        cut_value = linear_problem(domain, G, face_coeff, interpolate(dist, V), cut_result, vol_cells, bdy_length)
+        print("cut value is {}\n".format(cut_value))
         ax = plot(cut_result, vmin=0.0, vmax=1.0)
         pp.savefig(rd + '/cut_%s.png' % it, bbox_inches='tight', dpi=300)
         pp.close()
 
         bdy_nodes = extract_bdy_nodes(cut_result, domain, d, bdy_facets, adj_cells)
-        source = np.reshape(domain.coordinates()[1], (1, -1))
-        tt = domain2.raytrace(source, bdy_nodes)
-        print(np.count_nonzero(tt))
-        mesh_tt = domain2.get_grid_traveltimes()
-        print(np.count_nonzero(mesh_tt))
+        distance = np.zeros((len(bdy_nodes), domain.num_vertices()))
+        start = time.time()
+        for node in range(len(bdy_nodes)):
+            source = np.reshape(domain.coordinates()[bdy_nodes[node]], (1, -1))
+            tt = domain2.raytrace(source, source, slowness)
+            distance[node] = domain2.get_grid_traveltimes()
+        min_distance = np.min(distance, axis=0)
+        dist = Function(Vr)
+        dist.vector()[:] = np.array([min_distance[d2v[i]] - 0.1 for i in range(domain.num_vertices())], dtype=float)
+        print("Computing the distance took - {} seconds \n".format(time.time() - start))
 
-        # plotting the resulting rays
-        fig = pp.figure()
-        ax = fig.add_subplot()
-        ax.plot(bdy_nodes[:, 0], bdy_nodes[:, 1], ',')
-
-        # add rays for the receivers at the surface
-        """nRx = bdy_nodes.shape[0]
-        for r in rays[:nRx]:
-            pp.plot(r[:, 0], r[:, 1], c=[0.5, 0.5, 0.5], lw=0.001)"""
-
-        pp.savefig(rd + '/bdy_cut_%s.png' % it, bbox_inches='tight', dpi=300)
+        # plotting the resulting distance
+        ax = plot(dist)
+        pp.colorbar(ax, shrink=0.55, format='%3f')
+        pp.savefig(rd + '/dist_%s.png' % it, bbox_inches='tight', dpi=300)
         pp.close()
         it += 1
 
