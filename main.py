@@ -15,17 +15,17 @@ def _main():
     rd = result_directory()
 
     # ---variables
-    nx, ny, n = [200, 200, 80]
+    nx, ny, n = [200, 200, 300]
     lx1, lx2 = [-0.5, 0.5]
     ly1, ly2 = [0.0, 0.5]
     lz1, lz2 = [0.0, 0.5]
     random = True
     d = 2
-    height = 0.1
-    input_slope = 3
+    height = 0.4
+    input_slope = 1
 
     # BOUNDARY PARAMETERS
-    face_coeff = 1e+3
+    face_coeff = 1e+2
 
     # GEOMETRY LOOP ----------------------------------------------------------------------------------------------------
     print("Starting geometry loop...\n")
@@ -73,17 +73,19 @@ def _main():
     elif d == 3:
         facet_size = np.array([Face(domain, face).area() for face in facets_list])
 
-    # Adding boundary info
+    # Adding boundary info (probably can be vectorized)
     for facet in bdy_facets:
         if mid_cell[f2c(facet)[0]][d - 1] >= height:
             bdy_length.vector()[f2c(facet)[0]] += facet_size[facet]
+        else:
+            bdy_length.vector()[f2c(facet)[0]] -= facet_size[facet]
 
     # B2. --MOVING MESH TO MESH2D
     start_0 = time.time()
     if d == 2:
-        domain2 = Mesh2d(domain.coordinates(), cells_construction, method='DSPM')
+        domain2 = Mesh2d(domain.coordinates(), cells_construction, method='FSM')
     else:
-        domain2 = Mesh3d(domain.coordinates(), cells_construction, method='FSM')
+        domain2 = Mesh3d(domain.coordinates(), cells_construction,  method='FSM')
     print('exporting took {} seconds \n'.format(time.time()-start_0))
 
     # B2.---GRAPH GENERATION, creating graph with (d-1)-facets areas/length as weights, takes less than 0.1 seconds
@@ -106,22 +108,28 @@ def _main():
     # Constructing distance function to the boundary of the input
     bdy_nodes = extract_bdy_nodes(input_data, domain, d, bdy_facets, adj_cells)
     slowness = np.ones((cells_construction.shape[0],))
-    distance = np.zeros((len(bdy_nodes), domain.num_vertices()))
+    source = domain.coordinates()[bdy_nodes]
+    receiver = domain.coordinates()
     start = time.time()
-    for node in range(len(bdy_nodes)):
-        source = np.reshape(domain.coordinates()[bdy_nodes[node]], (1, -1))
-        tt = domain2.raytrace(source, source, slowness)
-        distance[node] = domain2.get_grid_traveltimes()
-    min_distance = np.min(distance, axis=0)
+    tt = domain2.raytrace(source, receiver, slowness, aggregate_src=True)
+    min_distance = domain2.get_grid_traveltimes().astype(np.float64)
     dist = Function(Vr)
-    dist.vector()[:] = np.array([min_distance[d2v[i]] - 0.1 for i in range(domain.num_vertices())], dtype=float)
+    dist.vector()[:] = np.array([min_distance[d2v[i]] for i in range(domain.num_vertices())], dtype=np.float64)
     print("Computing the distance took - {} seconds \n".format(time.time() - start))
 
     # Plotting the resulting distance
-    ax = plot(dist)
+    ax = plot(interpolate(dist, V))
     pp.colorbar(ax, shrink=0.55, format='%3f')
     pp.savefig(rd + '/dist_input.png', bbox_inches='tight', dpi=300)
     pp.close()
+    """fig = pp.figure(figsize=(10, 4))
+    ax = fig.add_subplot(111)
+
+    tpc = ax.tripcolor(domain.coordinates()[:, 0], domain.coordinates()[:, 1], cells_construction, min_distance)
+    cbar = pp.colorbar(tpc, ax=ax)
+    cbar.ax.set_ylabel('Distance', fontsize=14)
+    pp.savefig(rd + '/dist_input.png', bbox_inches='tight', dpi=300)
+    pp.close()"""
 
     # MAIN LOOP --------------------------------------------------------------------------------------------------------
     max_it, it, stop = [50, 1, False]
@@ -136,22 +144,21 @@ def _main():
         pp.close()
 
         bdy_nodes = extract_bdy_nodes(cut_result, domain, d, bdy_facets, adj_cells)
-        distance = np.zeros((len(bdy_nodes), domain.num_vertices()))
+        source = domain.coordinates()[bdy_nodes]
+        receiver = domain.coordinates()
         start = time.time()
-        for node in range(len(bdy_nodes)):
-            source = np.reshape(domain.coordinates()[bdy_nodes[node]], (1, -1))
-            tt = domain2.raytrace(source, source, slowness)
-            distance[node] = domain2.get_grid_traveltimes()
-        min_distance = np.min(distance, axis=0)
+        tt = domain2.raytrace(source, receiver, slowness, aggregate_src=True)
+        min_distance = domain2.get_grid_traveltimes()
         dist = Function(Vr)
-        dist.vector()[:] = np.array([min_distance[d2v[i]] - 0.1 for i in range(domain.num_vertices())], dtype=float)
+        dist.vector()[:] = np.array([min_distance[d2v[i]] for i in range(domain.num_vertices())], dtype=float)
         print("Computing the distance took - {} seconds \n".format(time.time() - start))
 
         # plotting the resulting distance
-        ax = plot(dist)
-        pp.colorbar(ax, shrink=0.55, format='%3f')
-        pp.savefig(rd + '/dist_%s.png' % it, bbox_inches='tight', dpi=300)
-        pp.close()
+        if len(bdy_nodes) != 0:
+            ax = plot(interpolate(dist, V))
+            #pp.colorbar(ax, shrink=0.55, format='%3f')
+            pp.savefig(rd + '/dist_%s.png' % it, bbox_inches='tight', dpi=300)
+            pp.close()
         it += 1
 
 
