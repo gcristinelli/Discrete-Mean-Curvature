@@ -22,7 +22,7 @@ def input_fun(x, coord, sl):
                 ((x[0] - coord[1][0]) ** 2 + (
                         x[1] - (coord[0][1] + 0.5 * (coord[1][1] - coord[0][1]))) ** 2 < np.minimum(
                     0.5 * (coord[1][0] - coord[0][0]), 0.5 * (coord[1][1] - coord[0][1])) ** 2)
-    return - float(input_val)
+    return float(input_val)
 
 
 def create_mesh(coord, n, random):
@@ -59,3 +59,16 @@ def extract_bdy_nodes(fun, domain, d, bdy_facets, adj_cells):
     bdy_fun_nodes = np.unique(bdy_fun_nodes)
     return bdy_fun_nodes
 
+
+def signed_distance(fun, domain, vr, source, receiver, slowness):
+    d2v = dof_to_vertex_map(vr)
+    start = time.time()
+    tt = domain.raytrace(source, receiver, slowness, aggregate_src=True)
+    min_distance = domain.get_grid_traveltimes().astype(np.float64)
+    dist = Function(vr)
+    dist.vector()[:] = np.array([min_distance[d2v[i]] for i in range(domain.get_number_of_nodes())], dtype=np.float64)
+    fun.vector()[:] = 2*(fun.vector()[:] - 0.5)
+    fun = interpolate(fun, vr)
+    dist.vector()[:] = - fun.vector().get_local()*dist.vector().get_local()
+    print("Computing the distance took - {} seconds \n".format(time.time() - start))
+    return dist

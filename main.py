@@ -6,9 +6,6 @@ from dolfin import *
 from operations import *
 
 
-# import skfmm  # fast marching for distances (scikit-fmm)
-
-
 ########################################################################################################################
 def _main():
     # ---make a timestamped folder to spam images
@@ -21,11 +18,14 @@ def _main():
     lz1, lz2 = [0.0, 0.5]
     random = True
     d = 2
-    height = 0.4
-    input_slope = 1
+    height = 0.2
+    input_slope = 2
 
     # BOUNDARY PARAMETERS
     face_coeff = 1e+2
+
+    # LOOP
+    max_it, it, stop = [50, 0, False]
 
     # GEOMETRY LOOP ----------------------------------------------------------------------------------------------------
     print("Starting geometry loop...\n")
@@ -40,16 +40,11 @@ def _main():
 
     V = FunctionSpace(domain, 'DG', 0)  # PWC
     Vr = FunctionSpace(domain, 'CG', 1)  # PWL
-    x = Vr.tabulate_dof_coordinates()
-    V_vec = VectorFunctionSpace(domain, 'DG', 0)
-    Vmat = TensorFunctionSpace(domain, 'DG', 0)
-    Vr_vec = VectorFunctionSpace(domain, 'CG', 1)
 
     vol_cells, bdy_length = Function(V), Function(V)
     domain.init()
     f2c = domain.topology()(d - 1, d)
     c2n = domain.topology()(d, 0)
-    d2v = dof_to_vertex_map(Vr)
     int_lengths, facet_size = np.empty(0), np.empty(0)
 
     # Creating two array of indices of (d-1)-dimensional objects (boundary or internal)
@@ -81,12 +76,10 @@ def _main():
             bdy_length.vector()[f2c(facet)[0]] -= facet_size[facet]
 
     # B2. --MOVING MESH TO MESH2D
-    start_0 = time.time()
     if d == 2:
         domain2 = Mesh2d(domain.coordinates(), cells_construction, method='FSM')
     else:
         domain2 = Mesh3d(domain.coordinates(), cells_construction,  method='FSM')
-    print('exporting took {} seconds \n'.format(time.time()-start_0))
 
     # B2.---GRAPH GENERATION, creating graph with (d-1)-facets areas/length as weights, takes less than 0.1 seconds
     G = maxflow.GraphFloat()
@@ -101,7 +94,8 @@ def _main():
     input_data.vector()[:] = np.array([input_fun(mid_cell[cell], coord, input_slope)
                                        for cell in range(domain.num_cells())])
     # Plotting the input
-    ax = plot(input_data, vmin=-1.0, vmax=1.0)
+    ax = plot(input_data)
+    pp.colorbar(ax, shrink=0.55, format='%3f')
     pp.savefig(rd + '/input.png', bbox_inches='tight', dpi=300)
     pp.close()
 
@@ -110,55 +104,39 @@ def _main():
     slowness = np.ones((cells_construction.shape[0],))
     source = domain.coordinates()[bdy_nodes]
     receiver = domain.coordinates()
-    start = time.time()
-    tt = domain2.raytrace(source, receiver, slowness, aggregate_src=True)
-    min_distance = domain2.get_grid_traveltimes().astype(np.float64)
-    dist = Function(Vr)
-    dist.vector()[:] = np.array([min_distance[d2v[i]] for i in range(domain.num_vertices())], dtype=np.float64)
-    print("Computing the distance took - {} seconds \n".format(time.time() - start))
+    dist = signed_distance(input_data, domain2, Vr, source, receiver, slowness)
 
     # Plotting the resulting distance
     ax = plot(interpolate(dist, V))
     pp.colorbar(ax, shrink=0.55, format='%3f')
     pp.savefig(rd + '/dist_input.png', bbox_inches='tight', dpi=300)
     pp.close()
-    """fig = pp.figure(figsize=(10, 4))
-    ax = fig.add_subplot(111)
-
-    tpc = ax.tripcolor(domain.coordinates()[:, 0], domain.coordinates()[:, 1], cells_construction, min_distance)
-    cbar = pp.colorbar(tpc, ax=ax)
-    cbar.ax.set_ylabel('Distance', fontsize=14)
-    pp.savefig(rd + '/dist_input.png', bbox_inches='tight', dpi=300)
-    pp.close()"""
 
     # MAIN LOOP --------------------------------------------------------------------------------------------------------
-    max_it, it, stop = [50, 1, False]
+    cut_value = np.zeros(max_it)
     cut_result = Function(V)
     while it <= max_it or stop:
         print("--Doing iteration", it)
         # L1.--- new cut
-        cut_value = linear_problem(domain, G, face_coeff, interpolate(dist, V), cut_result, vol_cells, bdy_length)
-        print("cut value is {}\n".format(cut_value))
-        ax = plot(cut_result, vmin=0.0, vmax=1.0)
+        cut_value[it] = linear_problem(domain, G, face_coeff, interpolate(dist, V), cut_result, vol_cells, bdy_length)
+        print("cut value is {}\n".format(cut_value[it]))
+
+        # plotting cut result
+        ax = plot(cut_result)
+        pp.colorbar(ax, shrink=0.55, format='%3f')
         pp.savefig(rd + '/cut_%s.png' % it, bbox_inches='tight', dpi=300)
         pp.close()
 
         bdy_nodes = extract_bdy_nodes(cut_result, domain, d, bdy_facets, adj_cells)
         source = domain.coordinates()[bdy_nodes]
         receiver = domain.coordinates()
-        start = time.time()
-        tt = domain2.raytrace(source, receiver, slowness, aggregate_src=True)
-        min_distance = domain2.get_grid_traveltimes()
-        dist = Function(Vr)
-        dist.vector()[:] = np.array([min_distance[d2v[i]] for i in range(domain.num_vertices())], dtype=float)
-        print("Computing the distance took - {} seconds \n".format(time.time() - start))
+        dist = signed_distance(cut_result, domain2, Vr, source, receiver, slowness)
 
         # plotting the resulting distance
-        if len(bdy_nodes) != 0:
-            ax = plot(interpolate(dist, V))
-            #pp.colorbar(ax, shrink=0.55, format='%3f')
-            pp.savefig(rd + '/dist_%s.png' % it, bbox_inches='tight', dpi=300)
-            pp.close()
+        ax = plot(interpolate(dist, V))
+        pp.colorbar(ax, shrink=0.55, format='%3f')
+        pp.savefig(rd + '/dist_%s.png' % it, bbox_inches='tight', dpi=300)
+        pp.close()
         it += 1
 
 
