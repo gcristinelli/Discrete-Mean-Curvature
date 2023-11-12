@@ -311,7 +311,8 @@ def _main():
         sdn_mat = _func2mat(pxr, pyr, sdbdy_fnr, sdn_mat, dofsVr_max)
         # sdn_mat = gaussian_filter(sdn_mat, sigma=5)
         sdn_mat = \
-        skfmm.extension_velocities(dist_mat_signed - 0.0 * np.ones((Ny + 1, Nx + 1)), sdn_mat, dx=(lx2 - lx1) / Nx)[1]
+            skfmm.extension_velocities(dist_mat_signed - 0.0 * np.ones((Ny + 1, Nx + 1)), sdn_mat, dx=(lx2 - lx1) / Nx)[
+                1]
         sdn_fnr = _mat2func(pxr, pyr, sdn_fnr, sdn_mat, dofsVr_max)
         sdn_fnr.set_allow_extrapolation(True)
         sdn_fn = interpolate(sdn_fnr, V)
@@ -353,8 +354,8 @@ def _main():
         for face in range(mesh.num_faces()):
             # src_sink_cap.vector()[face] = face_coeff*(1.0-2.0*input_data.vector()[face])*vol_face_fn.vector()[face] + bdy_length_fn.vector()[face]
             src_sink_cap.vector()[face] = face_coeff * (
-                        dist_fn.vector()[face] - elas_coeff * sdn_fn.vector()[face] + 0.25) * (
-                                                      1.0 - 2.0 * cut_result.vector()[face]) * vol_face_fn.vector()[
+                    dist_fn.vector()[face] - elas_coeff * sdn_fn.vector()[face] + 0.25) * (
+                                                  1.0 - 2.0 * cut_result.vector()[face]) * vol_face_fn.vector()[
                                               face] + \
                                           bdy_length_fn.vector()[face]
             G['source'][face]['capacity'] = np.maximum(0.0, src_sink_cap.vector()[face])
