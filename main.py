@@ -12,20 +12,20 @@ def _main():
     rd = result_directory()
 
     # ---variables
-    nx, ny, n = [200, 200, 300]
+    nx, ny, nz, n = [30, 30, 30, 270]
     lx1, lx2 = [-0.5, 0.5]
     ly1, ly2 = [0.0, 0.5]
     lz1, lz2 = [0.0, 0.5]
     random = True
     d = 2
-    height = 0.2
-    input_slope = 2
+    height = 0.3
+    input_slope = 3
 
     # BOUNDARY PARAMETERS
-    face_coeff = 1e+2
+    face_coeff = 1e+3
 
     # LOOP
-    max_it, it, stop = [50, 0, False]
+    max_it, it, stop = [50, 1, False]
 
     # GEOMETRY LOOP ----------------------------------------------------------------------------------------------------
     print("Starting geometry loop...\n")
@@ -33,10 +33,7 @@ def _main():
 
     # B1.---MESH GENERATION AND FUNCTION SPACES
     coord = [[lx1, ly1, lz1], [lx2, ly2, lz2]]
-    domain = create_mesh(coord, [nx, ny, n], random)
-    plot(domain, linewidth=0.25)
-    pp.savefig(rd + '/mesh.png', bbox_inches='tight', dpi=300)
-    pp.close()
+    domain = create_mesh(coord, [nx, ny, nz, n], random, d, rd)
 
     V = FunctionSpace(domain, 'DG', 0)  # PWC
     Vr = FunctionSpace(domain, 'CG', 1)  # PWL
@@ -76,10 +73,8 @@ def _main():
             bdy_length.vector()[f2c(facet)[0]] -= facet_size[facet]
 
     # B2. --MOVING MESH TO MESH2D
-    if d == 2:
-        domain2 = Mesh2d(domain.coordinates(), cells_construction, method='FSM')
-    else:
-        domain2 = Mesh3d(domain.coordinates(), cells_construction,  method='FSM')
+    if d == 2: domain2 = Mesh2d(domain.coordinates(), cells_construction, method='FSM', n_secondary=10)
+    else: domain2 = Mesh3d(domain.coordinates(), cells_construction,  method='SPM', n_secondary=2)
 
     # B2.---GRAPH GENERATION, creating graph with (d-1)-facets areas/length as weights, takes less than 0.1 seconds
     G = maxflow.GraphFloat()
@@ -94,10 +89,7 @@ def _main():
     input_data.vector()[:] = np.array([input_fun(mid_cell[cell], coord, input_slope)
                                        for cell in range(domain.num_cells())])
     # Plotting the input
-    ax = plot(input_data)
-    pp.colorbar(ax, shrink=0.55, format='%3f')
-    pp.savefig(rd + '/input.png', bbox_inches='tight', dpi=300)
-    pp.close()
+    plot_result(domain, adj_cells, rd, input_data, 0, 0, d)
 
     # Constructing distance function to the boundary of the input
     bdy_nodes = extract_bdy_nodes(input_data, domain, d, bdy_facets, adj_cells)
@@ -107,25 +99,19 @@ def _main():
     dist = signed_distance(input_data, domain2, Vr, source, receiver, slowness)
 
     # Plotting the resulting distance
-    ax = plot(interpolate(dist, V))
-    pp.colorbar(ax, shrink=0.55, format='%3f')
-    pp.savefig(rd + '/dist_input.png', bbox_inches='tight', dpi=300)
-    pp.close()
+    plot_result(domain, adj_cells, rd, interpolate(dist, V), 2, 0, d)
 
     # MAIN LOOP --------------------------------------------------------------------------------------------------------
-    cut_value = np.zeros(max_it)
+    cut_value = np.zeros(max_it + 1)
     cut_result = Function(V)
     while it <= max_it or stop:
         print("--Doing iteration", it)
         # L1.--- new cut
         cut_value[it] = linear_problem(domain, G, face_coeff, interpolate(dist, V), cut_result, vol_cells, bdy_length)
-        print("cut value is {}\n".format(cut_value[it]))
+        print("  cut value is {}\n".format(cut_value[it]))
 
         # plotting cut result
-        ax = plot(cut_result)
-        pp.colorbar(ax, shrink=0.55, format='%3f')
-        pp.savefig(rd + '/cut_%s.png' % it, bbox_inches='tight', dpi=300)
-        pp.close()
+        plot_result(domain, adj_cells, rd, cut_result, 1, it, d)
 
         bdy_nodes = extract_bdy_nodes(cut_result, domain, d, bdy_facets, adj_cells)
         source = domain.coordinates()[bdy_nodes]
@@ -133,10 +119,7 @@ def _main():
         dist = signed_distance(cut_result, domain2, Vr, source, receiver, slowness)
 
         # plotting the resulting distance
-        ax = plot(interpolate(dist, V))
-        pp.colorbar(ax, shrink=0.55, format='%3f')
-        pp.savefig(rd + '/dist_%s.png' % it, bbox_inches='tight', dpi=300)
-        pp.close()
+        plot_result(domain, adj_cells, rd, interpolate(dist, V), 2, it, d)
         it += 1
 
 
