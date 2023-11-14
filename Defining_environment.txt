@@ -1,8 +1,10 @@
-CONDA_SUBDIR=osx-64 conda create -n platformx86 python=3.8
+CONDA_SUBDIR=osx-64 conda create -n NAME-ENV python=3.8
 
-conda activate platformx86
+conda activate NAME-ENV
 
 conda config --env --add channels https://conda.anaconda.org/conda-forge/osx-64/
+
+conda config --env --set channel_priority strict
 
 conda install numpy, scipy, fenics, matplotlib, mshr, vtk
 
