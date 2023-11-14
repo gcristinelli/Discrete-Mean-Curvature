@@ -12,7 +12,7 @@ def _main():
     rd = result_directory()
 
     # ---variables
-    nx, ny, nz, n = [30, 30, 30, 270]
+    nx, ny, nz, n = [50, 50, 50, 150]
     lx1, lx2 = [-0.5, 0.5]
     ly1, ly2 = [0.0, 0.5]
     lz1, lz2 = [0.0, 0.5]
@@ -105,10 +105,11 @@ def _main():
     cut_value = np.zeros(max_it + 1)
     cut_result = Function(V)
     while it <= max_it or stop:
+        face_coeff = 0.9 * face_coeff
         print("--Doing iteration", it)
         # L1.--- new cut
         cut_value[it] = linear_problem(domain, G, face_coeff, interpolate(dist, V), cut_result, vol_cells, bdy_length)
-        print("  cut value is {}\n".format(cut_value[it]))
+        print(" cut value is {}\n".format(cut_value[it]))
 
         # plotting cut result
         plot_result(domain, adj_cells, rd, cut_result, 1, it, d)
