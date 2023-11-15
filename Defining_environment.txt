@@ -6,6 +6,6 @@ conda config --env --add channels https://conda.anaconda.org/conda-forge/osx-64/
 
 conda config --env --set channel_priority strict
 
-conda install numpy, scipy, fenics, matplotlib, mshr, vtk
+conda install numpy scipy fenics matplotlib mshr vtk
 
-pip install pymaxflow, ttcrpy
+pip install pymaxflow ttcrpy
