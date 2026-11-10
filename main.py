@@ -18,11 +18,12 @@ def _main():
     lz1, lz2 = [0.0, 0.5]
     random = True
     d = 3
-    height = 0.2
+    height = 0.5
     input_slope = 3
 
     # BOUNDARY PARAMETERS
     face_coeff = 1e+4
+    volume_coeff = 1e+6  # Quadratic volume penalty; zero disables volume control.
 
     # LOOP
     max_it, it, stop = [50, 1, False]
@@ -94,6 +95,8 @@ def _main():
                                        #for cell in range(domain.num_cells())])
     input_data.vector()[:] = np.array([input_cylinder(mid_cell[cell], coord, 0.4, d)
                                        for cell in range(domain.num_cells())])
+    target_volume = np.dot(vol_cells.vector().get_local(), input_data.vector().get_local())
+    print("Target volume = {:.8g}".format(target_volume))
     # Plotting the input
     plot_result(domain, adj_cells, facet_nodes, rd, input_data, 0, 0, d)
 
@@ -114,11 +117,14 @@ def _main():
     # MAIN LOOP --------------------------------------------------------------------------------------------------------
     cut_value = np.zeros(max_it + 1)
     cut_result = Function(V)
+    cut_result.assign(input_data)
     while it <= max_it and not stop:
         face_coeff = 0.9 * face_coeff
         print("--Doing iteration", it)
         # L1.--- new cut
-        cut_value[it] = linear_problem(cells_list, G, face_coeff, dist_cells, cut_result, vol_cells, bdy_length)
+        cut_value[it] = linear_problem(
+            cells_list, G, face_coeff, dist_cells, cut_result, vol_cells, bdy_length,
+            adj_cells, facet_size, target_volume, volume_coeff)
         print(" cut value is {}\n".format(cut_value[it]))
 
         # plotting cut result

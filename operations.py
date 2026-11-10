@@ -71,17 +71,70 @@ def create_mesh(coord, n, random, d, rd):
     return domain
 
 
-def linear_problem(cells_list, graph, face_coeff, dist, cut_result, vol_cells, bdy_length):
+def linear_problem(cells_list, graph, face_coeff, dist, cut_result, vol_cells, bdy_length,
+                   adj_cells, facet_size, target_volume, volume_coeff, max_volume_it=32):
+    """Search graph cuts for E + volume_coeff / 2 * (volume - target_volume)**2.
+
+    The multiplier satisfies lambda = volume_coeff * (volume - target_volume).
+    Binary cut volumes can jump, so keep the best penalized candidate, including
+    the previous cut. This is not a global solver for the binary soft constraint.
+    The returned energy includes signed unary terms and the volume penalty.
+    """
     start_time = time.time()
-    val = face_coeff * dist.vector() * vol_cells.vector() + bdy_length.vector()
-    positive = np.maximum(0.0, val)
-    negative = np.maximum(0.0, -val)
-    graph.add_grid_tedges(cells_list, positive, negative)
-    energy = graph.maxflow()
-    cut_result.vector()[:] = graph.get_grid_segments(cells_list).astype(float)
-    graph.add_grid_tedges(cells_list, -positive, -negative)
-    print(" cut took - %.2f seconds" % (time.time() - start_time))
-    return energy
+    volumes = vol_cells.vector().get_local()
+    total_volume = volumes.sum()
+    if not np.isfinite(volume_coeff) or volume_coeff < 0:
+        raise ValueError("volume_coeff must be finite and nonnegative")
+    if not np.isfinite(target_volume) or not 0 <= target_volume <= total_volume:
+        raise ValueError("target_volume must lie between zero and the domain volume")
+    val = face_coeff * dist.vector().get_local() * volumes + bdy_length.vector().get_local()
+    weights = facet_size[adj_cells[:, 0]]
+
+    def penalized_energy(labels):
+        volume = np.dot(volumes, labels)
+        perimeter = np.dot(weights, np.abs(labels[adj_cells[:, 1]] - labels[adj_cells[:, 2]]))
+        energy = perimeter + np.dot(val, labels) + 0.5 * volume_coeff * (volume - target_volume)**2
+        return energy, volume
+
+    best_labels = cut_result.vector().get_local()
+    best_energy, best_volume = penalized_energy(best_labels)
+    lower = -volume_coeff * target_volume
+    upper = volume_coeff * (total_volume - target_volume)
+    multiplier = 0.0
+    # Include the bracket endpoints, then bisect the monotone multiplier residual.
+    multipliers = [0.0, lower, upper] if volume_coeff else [0.0]
+    solves = 0
+    for iteration in range(len(multipliers) + max_volume_it if volume_coeff else 1):
+        if iteration < len(multipliers):
+            multiplier = multipliers[iteration]
+        else:
+            multiplier = 0.5 * (lower + upper)
+        unary = val + multiplier * volumes
+        positive = np.maximum(0.0, unary)
+        negative = np.maximum(0.0, -unary)
+        graph.add_grid_tedges(cells_list, positive, negative)
+        try:
+            graph.maxflow()
+            labels = graph.get_grid_segments(cells_list).astype(float)
+        finally:
+            graph.add_grid_tedges(cells_list, -positive, -negative)
+        solves += 1
+        energy, volume = penalized_energy(labels)
+        if energy < best_energy or not volume_coeff:
+            best_labels, best_energy, best_volume = labels, energy, volume
+        residual = multiplier - volume_coeff * (volume - target_volume)
+        if not volume_coeff or residual == 0:
+            break
+        if residual < 0:
+            lower = max(lower, multiplier)
+        else:
+            upper = min(upper, multiplier)
+        if iteration >= len(multipliers) - 1 and upper - lower <= 1e-8 * max(1.0, abs(lower), abs(upper)):
+            break
+    cut_result.vector()[:] = best_labels
+    print(" cut took - {:.2f} seconds ({} graph cuts)".format(time.time() - start_time, solves))
+    print(" volume = {:.8g}, target = {:.8g}, error = {:+.3e}".format(best_volume, target_volume, best_volume - target_volume))
+    return best_energy
 
 
 def extract_bdy_nodes(fun, facet_nodes, bdy_facets, bdy_cells, adj_cells):
