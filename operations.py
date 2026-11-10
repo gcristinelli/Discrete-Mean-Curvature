@@ -71,37 +71,34 @@ def create_mesh(coord, n, random, d, rd):
     return domain
 
 
-def linear_problem(domain, graph, face_coeff, dist, cut_result, vol_cells, bdy_length):
+def linear_problem(cells_list, graph, face_coeff, dist, cut_result, vol_cells, bdy_length):
     start_time = time.time()
     val = face_coeff * dist.vector() * vol_cells.vector() + bdy_length.vector()
-    graph.add_grid_tedges(np.arange(domain.num_cells()), np.maximum(0.0, val), np.maximum(0.0, -val))
+    positive = np.maximum(0.0, val)
+    negative = np.maximum(0.0, -val)
+    graph.add_grid_tedges(cells_list, positive, negative)
     energy = graph.maxflow()
-    cut_result.vector()[:] = graph.get_grid_segments(np.arange(domain.num_cells())).astype(float)
-    graph.add_grid_tedges(np.arange(domain.num_cells()), -np.maximum(0.0, val), -np.maximum(0.0, -val))
+    cut_result.vector()[:] = graph.get_grid_segments(cells_list).astype(float)
+    graph.add_grid_tedges(cells_list, -positive, -negative)
     print(" cut took - %.2f seconds" % (time.time() - start_time))
     return energy
 
 
-def extract_bdy_nodes(fun, domain, d, bdy_facets, adj_cells):
-    f2n = domain.topology()(d - 1, 0)
-    f2c = domain.topology()(d - 1, d)
-    bdy_fun = MeshFunction('size_t', domain, d - 1, 0)
-    bdy_fun.array()[bdy_facets] = np.array([abs(fun.vector()[f2c(facet)[0]]) for facet in bdy_facets])
-    bdy_fun.array()[adj_cells[:, 0]] = abs(
-        fun.vector()[adj_cells[:, 1]] - fun.vector()[adj_cells[:, 2]])
-    bdy_fun_indices = np.flatnonzero(bdy_fun.array())
-    bdy_fun_nodes = np.array([f2n(facet) for facet in bdy_fun_indices], dtype=int)
-    bdy_fun_nodes = np.unique(bdy_fun_nodes)
-    return bdy_fun_nodes
+def extract_bdy_nodes(fun, facet_nodes, bdy_facets, bdy_cells, adj_cells):
+    values = fun.vector().get_local()
+    bdy_fun_indices = np.concatenate((
+        bdy_facets[values[bdy_cells] != 0],
+        adj_cells[values[adj_cells[:, 1]] != values[adj_cells[:, 2]], 0],
+    ))
+    return np.unique(facet_nodes[bdy_fun_indices])
 
 
-def signed_distance(fun, domain, vr, source, receiver, slowness):
-    d2v = dof_to_vertex_map(vr)
+def signed_distance(fun, domain, vr, d2v, source, receiver, slowness):
     start = time.time()
     tt = domain.raytrace(source, receiver, slowness, aggregate_src=True)
     min_distance = domain.get_grid_traveltimes().astype(np.float64)
     dist = Function(vr)
-    dist.vector()[:] = np.array([min_distance[d2v[i]] for i in range(domain.get_number_of_nodes())], dtype=np.float64)
+    dist.vector()[:] = min_distance[d2v]
     fun = interpolate(fun, vr)
     fun.vector()[:] = 2 * (fun.vector()[:] - 0.5)
     dist.vector()[:] = - fun.vector().get_local() * dist.vector().get_local()
@@ -109,7 +106,7 @@ def signed_distance(fun, domain, vr, source, receiver, slowness):
     return dist
 
 
-def plot_result(domain, adj_cells, rd, f, n, j, d):
+def plot_result(domain, adj_cells, facet_nodes, rd, f, n, j, d):
     if d == 2:
         ax = plot(f)
         pp.colorbar(ax, shrink=0.55, format='%01.3f')
@@ -118,13 +115,13 @@ def plot_result(domain, adj_cells, rd, f, n, j, d):
         if n == 2: pp.savefig(rd + '/sdist_%s.png' % j, bbox_inches='tight', dpi=600)
         pp.close()
     elif n != 2:
-        _export_ply(domain, adj_cells, f, j, n, 1 / 255, rd)
+        _export_ply(domain, adj_cells, facet_nodes, f, j, n, 1 / 255, rd)
 
 
-def _export_ply(domain, adj_cells, fun, j, index, threshold, rd):
-    domain.init(2, 0)
-    f2v = domain.topology()(2, 0)
-    var = np.abs(fun.vector()[adj_cells[:, 2]] - fun.vector()[adj_cells[:, 1]])
+def _export_ply(domain, adj_cells, facet_nodes, fun, j, index, threshold, rd):
+    coordinates = domain.coordinates()
+    values = fun.vector().get_local()
+    var = np.abs(values[adj_cells[:, 2]] - values[adj_cells[:, 1]])
     var_index = np.column_stack((adj_cells[:, 0], var))
     non_zero_var = var_index[var_index[:, 1] > threshold]
     n = len(non_zero_var[:, 0])
@@ -146,9 +143,9 @@ def _export_ply(domain, adj_cells, fun, j, index, threshold, rd):
     triangles = np.concatenate((vertices_per_face, triangles.reshape((-1, 3))), axis=1)
 
     for face_index in range(n):
-        vert = f2v(int(non_zero_var[face_index, 0]))
+        vert = facet_nodes[int(non_zero_var[face_index, 0])]
         for vertex in vert:
-            f.write(" ".join(str(coord) for coord in domain.coordinates()[vertex]) + "\n")
+            f.write(" ".join(str(coord) for coord in coordinates[vertex]) + "\n")
 
     for face_index in range(n):
         f.write(" ".join(str(ind) for ind in triangles[face_index, :]) + " " + " ".join(

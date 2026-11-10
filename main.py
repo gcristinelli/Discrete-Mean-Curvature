@@ -12,13 +12,13 @@ def _main():
     rd = result_directory()
 
     # ---variables
-    nx, ny, nz, n = [5, 5, 5, 30]
+    nx, ny, nz, n = [40, 40, 40, 70]
     lx1, lx2 = [-0.5, 0.5]
     ly1, ly2 = [0.0, 0.5]
     lz1, lz2 = [0.0, 0.5]
     random = True
     d = 3
-    height = 0
+    height = 0.2
     input_slope = 3
 
     # BOUNDARY PARAMETERS
@@ -37,15 +37,19 @@ def _main():
 
     V = FunctionSpace(domain, 'DG', 0)  # PWC
     Vr = FunctionSpace(domain, 'CG', 1)  # PWL
+    d2v = dof_to_vertex_map(Vr)
+    receiver = domain.coordinates()
 
     vol_cells, bdy_length = Function(V), Function(V)
     domain.init()
     f2c = domain.topology()(d - 1, d)
+    f2n = domain.topology()(d - 1, 0)
     c2n = domain.topology()(d, 0)
     int_lengths, facet_size = np.empty(0), np.empty(0)
 
     # Creating two array of indices of (d-1)-dimensional objects (boundary or internal)
     facets_list = np.arange(domain.num_facets())
+    facet_nodes = np.array([f2n(facet) for facet in facets_list], dtype=int)
     bdy_facets = np.array([facet for facet in facets_list if len(f2c(facet)) == 1], dtype=int)
     internal_facets = np.setdiff1d(facets_list, bdy_facets)
 
@@ -91,20 +95,21 @@ def _main():
     input_data.vector()[:] = np.array([input_cylinder(mid_cell[cell], coord, 0.4, d)
                                        for cell in range(domain.num_cells())])
     # Plotting the input
-    plot_result(domain, adj_cells, rd, input_data, 0, 0, d)
+    plot_result(domain, adj_cells, facet_nodes, rd, input_data, 0, 0, d)
 
     # Constructing distance function to the boundary of the input
-    bdy_nodes = extract_bdy_nodes(input_data, domain, d, bdy_facets, adj_cells)
+    bdy_nodes = extract_bdy_nodes(input_data, facet_nodes, bdy_facets, bdy_cells, adj_cells)
     if bdy_nodes.size == 0:
         print("Input is empty; stopping.")
         return
     slowness = np.ones((cells_construction.shape[0],))
-    source = domain.coordinates()[bdy_nodes]
-    receiver = domain.coordinates()
-    dist = signed_distance(input_data, domain2, Vr, source, receiver, slowness)
+    source = receiver[bdy_nodes]
+    dist = signed_distance(input_data, domain2, Vr, d2v, source, receiver, slowness)
+    dist_cells = interpolate(dist, V)
 
     # Plotting the resulting distance
-    plot_result(domain, adj_cells, rd, interpolate(dist, V), 2, 0, d)
+    if d == 2:
+        plot_result(domain, adj_cells, facet_nodes, rd, dist_cells, 2, 0, d)
 
     # MAIN LOOP --------------------------------------------------------------------------------------------------------
     cut_value = np.zeros(max_it + 1)
@@ -113,22 +118,23 @@ def _main():
         face_coeff = 0.9 * face_coeff
         print("--Doing iteration", it)
         # L1.--- new cut
-        cut_value[it] = linear_problem(domain, G, face_coeff, interpolate(dist, V), cut_result, vol_cells, bdy_length)
+        cut_value[it] = linear_problem(cells_list, G, face_coeff, dist_cells, cut_result, vol_cells, bdy_length)
         print(" cut value is {}\n".format(cut_value[it]))
 
         # plotting cut result
-        plot_result(domain, adj_cells, rd, cut_result, 1, it, d)
+        plot_result(domain, adj_cells, facet_nodes, rd, cut_result, 1, it, d)
 
-        bdy_nodes = extract_bdy_nodes(cut_result, domain, d, bdy_facets, adj_cells)
+        bdy_nodes = extract_bdy_nodes(cut_result, facet_nodes, bdy_facets, bdy_cells, adj_cells)
         if bdy_nodes.size == 0:
             print("Cut is empty; stopping.")
             break
-        source = domain.coordinates()[bdy_nodes]
-        receiver = domain.coordinates()
-        dist = signed_distance(cut_result, domain2, Vr, source, receiver, slowness)
+        source = receiver[bdy_nodes]
+        dist = signed_distance(cut_result, domain2, Vr, d2v, source, receiver, slowness)
+        dist_cells = interpolate(dist, V)
 
         # plotting the resulting distance
-        plot_result(domain, adj_cells, rd, interpolate(dist, V), 2, it, d)
+        if d == 2:
+            plot_result(domain, adj_cells, facet_nodes, rd, dist_cells, 2, it, d)
         it += 1
 
 
