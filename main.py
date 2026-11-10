@@ -12,17 +12,17 @@ def _main():
     rd = result_directory()
 
     # ---variables
-    nx, ny, nz, n = [50, 50, 50, 150]
+    nx, ny, nz, n = [5, 5, 5, 30]
     lx1, lx2 = [-0.5, 0.5]
     ly1, ly2 = [0.0, 0.5]
     lz1, lz2 = [0.0, 0.5]
     random = True
-    d = 2
-    height = 0.3
+    d = 3
+    height = 0
     input_slope = 3
 
     # BOUNDARY PARAMETERS
-    face_coeff = 1e+3
+    face_coeff = 1e+4
 
     # LOOP
     max_it, it, stop = [50, 1, False]
@@ -86,13 +86,18 @@ def _main():
 
     # INPUT and First distance function --------------------------------------------------------------------------------
     input_data = Function(V)
-    input_data.vector()[:] = np.array([input_fun(mid_cell[cell], coord, input_slope)
+    #input_data.vector()[:] = np.array([input_fun(mid_cell[cell], coord, input_slope)
+                                       #for cell in range(domain.num_cells())])
+    input_data.vector()[:] = np.array([input_cylinder(mid_cell[cell], coord, 0.4, d)
                                        for cell in range(domain.num_cells())])
     # Plotting the input
     plot_result(domain, adj_cells, rd, input_data, 0, 0, d)
 
     # Constructing distance function to the boundary of the input
     bdy_nodes = extract_bdy_nodes(input_data, domain, d, bdy_facets, adj_cells)
+    if bdy_nodes.size == 0:
+        print("Input is empty; stopping.")
+        return
     slowness = np.ones((cells_construction.shape[0],))
     source = domain.coordinates()[bdy_nodes]
     receiver = domain.coordinates()
@@ -104,7 +109,7 @@ def _main():
     # MAIN LOOP --------------------------------------------------------------------------------------------------------
     cut_value = np.zeros(max_it + 1)
     cut_result = Function(V)
-    while it <= max_it or stop:
+    while it <= max_it and not stop:
         face_coeff = 0.9 * face_coeff
         print("--Doing iteration", it)
         # L1.--- new cut
@@ -115,6 +120,9 @@ def _main():
         plot_result(domain, adj_cells, rd, cut_result, 1, it, d)
 
         bdy_nodes = extract_bdy_nodes(cut_result, domain, d, bdy_facets, adj_cells)
+        if bdy_nodes.size == 0:
+            print("Cut is empty; stopping.")
+            break
         source = domain.coordinates()[bdy_nodes]
         receiver = domain.coordinates()
         dist = signed_distance(cut_result, domain2, Vr, source, receiver, slowness)

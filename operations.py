@@ -18,10 +18,33 @@ def result_directory():
 
 
 def input_fun(x, coord, sl):
-    input_val = (sl * (np.abs(x[0] - coord[0][0])) + (x[1] - coord[1][1]) < 0.0) | \
-                ((x[0] - coord[1][0]) ** 2 + (
+    input_val = (sl * (np.abs(x[0] - coord[0][0])) + (x[1] - coord[1][1]) < 0.0) | ((x[0] - coord[1][0]) ** 2 + (
                         x[1] - (coord[0][1] + 0.5 * (coord[1][1] - coord[0][1]))) ** 2 < np.minimum(
                     0.5 * (coord[1][0] - coord[0][0]), 0.5 * (coord[1][1] - coord[0][1])) ** 2)
+    return float(input_val)
+
+
+def input_cylinder(x, coord, height, d):
+    """
+    Evaluate the input function for a cylinder.
+
+    Parameters:
+    - x: Coordinates of the point.
+    - coord: Lower and upper domain corners; the cylinder starts at the lower axial bound.
+    - height: Height of the cylinder.
+    - d: Spatial dimension.
+
+    Returns:
+    - float: The value of the input function at the given point.
+    """
+    radius = 0.2*(coord[1][0]-coord[0][0])
+    center_x = 0.5 * (coord[0][0] + coord[1][0])
+    if d==2:
+        input_val = (abs(x[0] - center_x) < height) & (coord[0][1] <= x[1] <= coord[0][1] + radius)
+    else:
+        center_y = 0.5 * (coord[0][1] + coord[1][1])
+        distance_to_center = np.sqrt((x[1] - center_y) ** 2 + (x[0] - center_x) ** 2)
+        input_val = (distance_to_center < radius) & (coord[0][2] <= x[2] <= coord[0][2] + height)
     return float(input_val)
 
 
@@ -43,7 +66,7 @@ def create_mesh(coord, n, random, d, rd):
         pp.savefig(rd + '/mesh.png', bbox_inches='tight', dpi=300)
         pp.close()
     else:
-        domain = BoxMesh(Point(coord[0][0], coord[0][1], coord[0][1]),
+        domain = BoxMesh(Point(coord[0][0], coord[0][1], coord[0][2]),
                          Point(coord[1][0], coord[1][1], coord[1][2]), n[0], n[1], n[2])
     return domain
 
@@ -66,9 +89,8 @@ def extract_bdy_nodes(fun, domain, d, bdy_facets, adj_cells):
     bdy_fun.array()[bdy_facets] = np.array([abs(fun.vector()[f2c(facet)[0]]) for facet in bdy_facets])
     bdy_fun.array()[adj_cells[:, 0]] = abs(
         fun.vector()[adj_cells[:, 1]] - fun.vector()[adj_cells[:, 2]])
-    bdy_fun_indices = np.column_stack(np.nonzero(bdy_fun.array())).astype(int)
+    bdy_fun_indices = np.flatnonzero(bdy_fun.array())
     bdy_fun_nodes = np.array([f2n(facet) for facet in bdy_fun_indices], dtype=int)
-    bdy_fun_nodes = np.column_stack(bdy_fun_nodes).astype(int)
     bdy_fun_nodes = np.unique(bdy_fun_nodes)
     return bdy_fun_nodes
 
@@ -80,8 +102,8 @@ def signed_distance(fun, domain, vr, source, receiver, slowness):
     min_distance = domain.get_grid_traveltimes().astype(np.float64)
     dist = Function(vr)
     dist.vector()[:] = np.array([min_distance[d2v[i]] for i in range(domain.get_number_of_nodes())], dtype=np.float64)
-    fun.vector()[:] = 2 * (fun.vector()[:] - 0.5)
     fun = interpolate(fun, vr)
+    fun.vector()[:] = 2 * (fun.vector()[:] - 0.5)
     dist.vector()[:] = - fun.vector().get_local() * dist.vector().get_local()
     print("Computing the distance took - {} seconds \n".format(time.time() - start))
     return dist
@@ -105,9 +127,10 @@ def _export_ply(domain, adj_cells, fun, j, index, threshold, rd):
     var = np.abs(fun.vector()[adj_cells[:, 2]] - fun.vector()[adj_cells[:, 1]])
     var_index = np.column_stack((adj_cells[:, 0], var))
     non_zero_var = var_index[var_index[:, 1] > threshold]
-    normalized_var = (255 * (non_zero_var[:, 1] - np.min(non_zero_var[:, 1])) / (np.max(non_zero_var[:, 1]))).astype(
-        int)
     n = len(non_zero_var[:, 0])
+    normalized_var = np.empty(n, dtype=int)
+    if n:
+        normalized_var[:] = (255 * (non_zero_var[:, 1] - np.min(non_zero_var[:, 1])) / np.max(non_zero_var[:, 1])).astype(int)
     header = "ply\nformat ascii 1.0\nelement vertex {}\nproperty float x\nproperty float y\nproperty float z\nelement " \
              "face {}\nproperty list uchar int vertex_indices\nproperty uchar red \nproperty uchar green \nproperty " \
              "uchar blue \n end_header\n"
